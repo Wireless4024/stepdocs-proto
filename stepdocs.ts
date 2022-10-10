@@ -336,8 +336,10 @@ namespace Git {
 				prev = ptr
 			}
 			if (add_start != -1 && add_start != last && add_end != last) {
-				delete diffs[add_start].add
-				diffs[add_end + 1].add = true
+				if (diffs[add_start].content == diffs[add_end + 1].content) {
+					delete diffs[add_start].add
+					diffs[add_end + 1].add = true
+				}
 			}
 			return diffs
 		}
