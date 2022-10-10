@@ -316,8 +316,15 @@ namespace Git {
 			if (diffs.length < 3) return diffs
 			let off = 1
 			let prev = diffs[0]
+			let add_start = -1 + (prev.add as number)
+			const last = diffs.length - 1
+			let add_end = last
 			while (off < diffs.length) {
 				const ptr = diffs[off]
+				if (ptr.add) {
+					if (add_start == -1) add_start = off
+					add_end = off
+				}
 				if (prev.content == ptr.content) {
 					if (prev.add !== undefined && ptr.add !== undefined) {
 						diffs.splice(off - 1, 2, {content: ptr.content})
@@ -327,6 +334,10 @@ namespace Git {
 				}
 				++off
 				prev = ptr
+			}
+			if (add_start != -1 && add_start != last && add_end != last) {
+				delete diffs[add_start].add
+				diffs[add_end + 1].add = true
 			}
 			return diffs
 		}
