@@ -213,7 +213,14 @@ namespace Git {
 				d.diff = []
 				return d as DiffInfo
 			}
-			if (!change.startsWith("@@") || !change.endsWith("@@")) return undefined
+			if (!change.startsWith("@@")) {
+				const end_off = change.indexOf("@@", 3)
+				console.log(end_off)
+				if (!change.endsWith("@@") && end_off != -1) {
+					throw Error("Unexpected error (you can try to run again and hope its work)")
+				}
+				return undefined
+			}
 			const [src_change, res_change] = change.substring(3, change.length - 3).split(' ')
 			const [src_line, src_lines] = src_change.split(',')
 			const [res_line, res_lines] = res_change.split(',')
