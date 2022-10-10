@@ -44,16 +44,74 @@ namespace Util {
 		return res
 	}
 
-	export function apply_mixins<T extends { new(): any },
-		C extends { new(): any },
-		B extends C[]>(derivedCtor: T,
-	                   baseCtors: B): T & C {
-		for (const baseCtor of baseCtors) {
-			for (const name of Object.getOwnPropertyNames(baseCtor.prototype)) {
-				derivedCtor.prototype[name] = baseCtor.prototype[name];
-			}
+	export class MarkdownBuilder {
+		markdown: string = ""
+
+		constructor() {}
+
+		append<T>(obj: T) {
+			this.markdown += obj
+			return this
 		}
-		return derivedCtor as T & C
+
+		appendln<T = string>(obj?: T) {
+			if (obj !== undefined) this.markdown += obj
+			this.markdown += '  \n'
+			return this
+		}
+
+		link(alt: string, link: string) {
+			return this.append("[")
+			           .append(alt)
+			           .append("](")
+			           .append(link)
+			           .append(") ")
+		}
+
+		code_link(alt: string, link: string) {
+			return this.append("[`")
+			           .append(alt)
+			           .append("`](")
+			           .append(link)
+			           .append(") ")
+		}
+
+		header<T = string>(nth: number, str: T) {
+			for (let i = 0; i < nth; i++) this.append("#")
+			return this.append(" ").append(str)
+		}
+
+		quote<T = string>(text: T) {
+			return this.append("> ").appendln(text)
+		}
+
+		endsection() {
+			return this.append("\n---\n")
+		}
+
+		bullet(level = 0) {
+			for (let i = 0; i < level; i++) this.append("  ")
+			return this.append("+ ")
+		}
+
+		block(language: string) {
+			return new CodeBlockBuilder(this, language)
+		}
+	}
+
+	class CodeBlockBuilder {
+		constructor(private parent: MarkdownBuilder, language: string) {
+			this.parent.append('```').appendln(language)
+		}
+
+		append<T = string>(obj: T) {
+			this.parent.append(obj)
+			return this
+		}
+
+		end() {
+			return this.parent.appendln('```')
+		}
 	}
 }
 
@@ -291,17 +349,6 @@ async function run(cfg: string | { cwd: string, env?: Record<string, string> }, 
 }
 
 async function test() {
-	/*await remove("test", {recursive: true}).catch(it => {})
-	console.log(await mkdir("test"))
-	console.log(await Git.init("test"))
-	console.log(await Deno.writeTextFile("test/readme.md", "# This is a test generated repo"))
-	console.log(await Git.add("test", "readme.md"))
-	console.log(await Git.commit("test", "initial repo"))
-	console.log(await Deno.writeTextFile("test/readme.md", "# This is a test generated repo\n test test"))
-	console.log(await Git.add("test", "readme.md"))
-	console.log(await Git.commit("test", "add more content"))
-	*/
-
 	const folder_prefix = 'stepdocs-example/stepdocs-example.wiki'
 	origin = await Git.get_origin("stepdocs-example")
 	const logs = Util.collect(await Git.logs("stepdocs-example"))
@@ -320,14 +367,14 @@ async function test() {
 
 	}
 	const file_name_index: Record<string, string> = {}
-	for (let {file, name} of files) {
+	for (const {file, name} of files) {
 		file_name_index[file] = name
 	}
 	const docsnorm = new DocsNormalizer(folder_prefix)
-	const {step_no, steps} = await docsnorm.list_file_flat()
+	const {steps} = await docsnorm.list_file_flat()
 	//console.dir(steps, {depth: 1000})
 	// create navigation
-	let md = ''
+	let nav = new Util.MarkdownBuilder()
 	let last_step: number = 1
 	for (let i = 0; i < steps.length; i++) {
 		const prev = steps[i - 1]
@@ -335,15 +382,15 @@ async function test() {
 		const next = steps[i + 1]
 
 		if (step.file) {
-			if (last_step != step.parts[0]) {
-				md += '---\n'
-			}
+			if (last_step != step.parts[0]) nav.endsection()
 			last_step = step.parts[0]
 
 			const relative_path = step.file.substring(folder_prefix.length + 1)
 			//console.log(relative_path)
 			const file_name = file_name_index[relative_path]
-			md += '+ [' + file_name + '](' + relative_path.substring(0, relative_path.length - 3) + ')  \n'
+			nav.bullet(step.parts.length - 1)
+			   .link(file_name, relative_path.substring(0, relative_path.length - 3))
+			   .appendln()
 
 			/// replace marker
 			//console.log(relative_path)
@@ -353,19 +400,19 @@ async function test() {
 			if (prev && prev.file) {
 				const prev_path = prev.file!.substring(folder_prefix.length + 1)
 				const prev_name = file_name_index[prev_path]
-				prev_content = `Previous : [${prev_name}](${"../".repeat(0)}${prev_path.substring(0, prev_path.length - 3)})`
+				prev_content = `Previous : [${prev_name}](${prev_path.substring(0, prev_path.length - 3)})`
 			}
 			if (next && next.file) {
 				const next_path = next.file!.substring(folder_prefix.length + 1)
 				const next_name = file_name_index[next_path]
-				next_content = `Next : [${next_name}](${"../".repeat(0)}${next_path.substring(0, next_path.length - 3)})`
+				next_content = `Next : [${next_name}](${next_path.substring(0, next_path.length - 3)})`
 			}
 			contents = contents.replace('!!PREV_MARKER!!', prev_content)
 			contents = contents.replace('!!NEXT_MARKER!!', next_content)
 			await Deno.writeTextFile(folder_prefix + '/' + relative_path, contents)
 		}
 	}
-	await Deno.writeTextFile(folder_prefix + '/_Sidebar.md', md)
+	await Deno.writeTextFile(folder_prefix + '/_Sidebar.md', nav.markdown)
 }
 
 test().catch(async it => console.error(await it))
@@ -382,7 +429,7 @@ function get_file_for_commit(commit: CommitInfo): { name: string, file: string, 
 	const name = messages[0]
 	let [idx, msg] = name.substring(1).split(']')
 	msg = msg.trim()
-	const file = `${idx/*.replaceAll(/\./g, '-')*/}__${msg.replaceAll(/[\s.]/g, '-').replaceAll(/[?#]/g, '')}.md`
+	const file = `${idx}__${msg.replaceAll(/[\s.]/g, '-').replaceAll(/[?#]/g, '')}.md`
 
 	return {name: `${idx} ${msg}`, file, messages}
 }
@@ -404,59 +451,75 @@ function pick_language(filename: string): string {
 }
 
 const APP_VERSION = 'stepdocs-prototype-v0.1'
+const MODE: 'GHWIKI' | 'MARKDOWN' = 'GHWIKI'
 
 async function create_markdown(path: string, commit: CommitInfo): Promise<StepDocs> {
 	const diff = await Git.show(path, commit.hash)
 	const {name, file, messages} = get_file_for_commit(commit)
 	let markdown = ''//"# " + name + "\n"
-	markdown += '\n!!PREV_MARKER!!\n\n---\n'
+	const builder = new Util.MarkdownBuilder()
+	if (MODE != 'GHWIKI') builder.header(1, name).appendln()
+	builder.appendln('!!PREV_MARKER!!').endsection()
+	//markdown += '\n!!PREV_MARKER!!\n\n---\n'
 
-	if (messages.length > 2) {
-		for (let i = 2; i < messages.length; i++) {
-			const message = messages[i]
-			markdown += '> ' + message + '  \n'
-		}
-	}
+	if (messages.length > 2)
+		for (let i = 2; i < messages.length; i++)
+			builder.quote(messages[i])
 	for (const diff_info of Util.collect(diff)) {
 
 		//console.log(commit, diff_info)
 		if (!diff_info.diff?.length) {
 			const file_name = diff_info.result_path.substring(2)
 			if (origin)
-				markdown += '\n### Create empty file at [`' + file_name + "`](" + origin + '/tree/' + commit.hash + '/' + file_name + "`)  \n\n"
+				builder.header(3, "Create empty file at ")
+				       .code_link(file_name, origin + '/tree/' + commit.hash + '/' + file_name)
+				       .appendln()
 			else
-				markdown += '\n### Create empty file at `' + file_name + "`  \n\n"
+				builder.header(3, "Create empty file at `").append(file_name).appendln('`')
 		} else {
 			const file_name = diff_info.result_path.substring(2)
 			if (origin) {
-				markdown += '\n### File: [`' + file_name + "`](" + origin + '/tree/' + commit.hash + '/' + file_name + ")  \n"
+				builder.header(3, "File: ").link(file_name, origin + '/tree/' + commit.hash + '/' + file_name).appendln()
 			} else
-				markdown += '\n### File: ' + file_name + '  \n'
+				builder.header(3, "File: ").appendln(file_name)
 			if (diff_info.new_file) {
-				markdown += '```' + pick_language(diff_info.result_path) + '\n'
-				markdown += Git.DiffUtil.result(diff_info.diff)
+				builder.block(pick_language(diff_info.result_path))
+				       .append(Git.DiffUtil.result(diff_info.diff))
+				       .end()
 			} else {
-				markdown += '```diff\n'
-				markdown += Git.DiffUtil.join(Git.DiffUtil.normalize(diff_info.diff))
+				builder.block("diff")
+				       .append(Git.DiffUtil.join(Git.DiffUtil.normalize(diff_info.diff)))
+				       .end()
 			}
-			markdown += '```\n'
 		}
 	}
 
-	markdown += '\n\n---\n!!NEXT_MARKER!!\n\n---\n'
-
+	//markdown += '\n\n---\n!!NEXT_MARKER!!\n\n---\n'
+	builder.endsection()
+	       .appendln("!!NEXT_MARKER!!")
+	       .endsection()
 
 	if (origin) {
-		markdown += 'Commit Hash : [' + commit.hash + '](' + origin + '/commit/' + commit.hash + ')'
-		markdown += ' / [View files](' + origin + '/tree/' + commit.hash + ')  \n\n'
+		builder.append("Commit Hash : ")
+		       .link(commit.hash, origin + '/commit/' + commit.hash)
+		       .link("View files", origin + '/tree/' + commit.hash)
+		       .appendln()
+		//	markdown += 'Commit Hash : [' + commit.hash + '](' + origin + '/commit/' + commit.hash + ')'
+//		markdown += ' / [View files](' + origin + '/tree/' + commit.hash + ')  \n\n'
 	}
 
 	if (commit.author) {
 		const username = commit.author.split('<')[0].trim()
-		markdown += '\n\n---\n*Docs by [' + username + '](https://github.com/' + username +
-			')* (this docs generated from [*' + APP_VERSION + '*](https://github.com/Wireless4024/stepdocs-proto))\n'
+		// markdown += '\n\n---\n*Docs by [' + username + '](https://github.com/' + username +
+		// 	')* (this docs generated from [*' + APP_VERSION + '*](https://github.com/Wireless4024/stepdocs-proto))\n'
+		builder.endsection()
+		       .append("*Docs by ")
+		       .link(username, "https://github.com/" + username)
+		       .append("* (this docs generated from ")
+		       .link('*' + APP_VERSION + '*', 'https://github.com/Wireless4024/stepdocs-proto')
+		       .append(")")
 	}
-	return {file, markdown, commit_hash: commit.hash, name}
+	return {file, markdown: builder.markdown, commit_hash: commit.hash, name}
 }
 
 class DocsNormalizer {
